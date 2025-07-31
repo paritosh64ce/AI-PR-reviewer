@@ -26,32 +26,41 @@ public class GitHubWebhookFunction
     public async Task<HttpResponseData> Run(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post")] HttpRequestData req)
     {
-        var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-        using var doc = JsonDocument.Parse(requestBody);
-        var root = doc.RootElement;
-        var action = root.GetProperty("action").GetString();
-        if (action != "opened" && action != "synchronize" && action != "edited")
+        try
         {
-            var resp = req.CreateResponse(System.Net.HttpStatusCode.OK);
-            await resp.WriteStringAsync("Ignored event");
-            return resp;
+            var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+            _logger.LogInformation("Received webhook event: {body}", requestBody);
+
+            using var doc = JsonDocument.Parse(requestBody);
+            var root = doc.RootElement;
+            var action = root.GetProperty("action").GetString();
+            if (action != "opened" && action != "synchronize" && action != "edited")
+            {
+                var resp = req.CreateResponse(System.Net.HttpStatusCode.OK);
+                await resp.WriteStringAsync("Ignored event");
+                return resp;
+            }
+            var pr = root.GetProperty("pull_request");
+            var prNumber = pr.GetProperty("number").GetInt32();
+            var repo = root.GetProperty("repository");
+            var repoName = repo.GetProperty("name").GetString() ?? string.Empty;
+            var owner = repo.GetProperty("owner").GetProperty("login").GetString() ?? string.Empty;
+            var filesUrl = $"https://api.github.com/repos/{owner}/{repoName}/pulls/{prNumber}/files";
+            var (codeDiff, fullFiles) = await FetchPrFilesAndContents(filesUrl, owner, repoName, pr);
+            var feedback = await AnalyzeCodeWithOpenAI(codeDiff, fullFiles);
+            var commentsUrl = $"https://api.github.com/repos/{owner}/{repoName}/issues/{prNumber}/comments";
+            await PostComment(commentsUrl, feedback);
+            var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+            await response.WriteStringAsync("Reviewed");
+            return response;
         }
-        var pr = root.GetProperty("pull_request");
-        var prNumber = pr.GetProperty("number").GetInt32();
-        var repo = root.GetProperty("repository");
-        var repoName = repo.GetProperty("name").GetString();
-        var owner = repo.GetProperty("owner").GetProperty("login").GetString();
-        // Fetch PR files and their full content
-        var filesUrl = $"https://api.github.com/repos/{owner}/{repoName}/pulls/{prNumber}/files";
-        var (codeDiff, fullFiles) = await FetchPrFilesAndContents(filesUrl, owner, repoName, pr);
-        // Analyze code with OpenAI
-        var feedback = await AnalyzeCodeWithOpenAI(codeDiff, fullFiles);
-        // Post feedback as comment
-        var commentsUrl = $"https://api.github.com/repos/{owner}/{repoName}/issues/{prNumber}/comments";
-        await PostComment(commentsUrl, feedback);
-        var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
-        await response.WriteStringAsync("Reviewed");
-        return response;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception in GitHubWebhookFunction");
+            var errorResp = req.CreateResponse(System.Net.HttpStatusCode.InternalServerError);
+            await errorResp.WriteStringAsync($"Internal server error: {ex.Message}");
+            return errorResp;
+        }
     }
 
     // Fetches both code diffs and full file contents for updated files
