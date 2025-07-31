@@ -28,8 +28,24 @@ public class GitHubWebhookFunction
     {
         try
         {
+            _logger.LogWarning("Step 1: Start function");
             var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-            _logger.LogInformation("Received webhook event: {body}", requestBody);
+            _logger.LogWarning("Step 2: Read body: '{body}'", requestBody);
+
+            if (string.IsNullOrWhiteSpace(requestBody))
+            {
+                _logger.LogWarning("Request body is empty.");
+                var resp = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
+                await resp.WriteStringAsync("Request body is empty.");
+                return resp;
+            }
+            if (!requestBody.TrimStart().StartsWith("{"))
+            {
+                _logger.LogWarning("Request body is not valid JSON: {body}", requestBody);
+                var resp = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
+                await resp.WriteStringAsync("Request body is not valid JSON.");
+                return resp;
+            }
 
             using var doc = JsonDocument.Parse(requestBody);
             var root = doc.RootElement;
