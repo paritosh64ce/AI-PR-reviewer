@@ -24,7 +24,7 @@ public class GitHubWebhookFunction
 
     [Function("GitHubWebhook")]
     public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post")] HttpRequestData req)
     {
         var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
         using var doc = JsonDocument.Parse(requestBody);
