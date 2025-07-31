@@ -1,4 +1,4 @@
-# PR-Reviewer Bot
+# PRReviewerBot
 
 ## Overview
 PRReviewerBot is an Azure Functions-based bot that automatically reviews GitHub pull requests using Azure OpenAI (GPT). When a pull request is opened or updated, the bot analyzes code changes for naming, structure, and readability, then posts feedback as a comment on the PR.
@@ -25,33 +25,52 @@ PRReviewerBot is an Azure Functions-based bot that automatically reviews GitHub 
 ### Local Development
 
 1. **Clone the repository:**
-	```bash
-	git clone <your-repo-url>
-	cd <repo-folder>
-	```
+    ```bash
+    git clone <your-repo-url>
+    cd <repo-folder>
+    ```
 
 2. **Configure secrets:**
-Edit `PrReviewerBot/local.settings.json` and add:
-	```json
-	{
-	  "IsEncrypted": false,
-	  "Values": {
-		"GitHubToken": "<your-github-token>",
-		"OpenAIEndpoint": "<your-openai-endpoint>",
-		"OpenAIKey": "<your-openai-key>"
-	  }
-	}
-	```
+    Edit `PrReviewerBot/local.settings.json` and add:
+    ```json
+    {
+      "IsEncrypted": false,
+      "Values": {
+        "GitHubToken": "<your-github-token>",
+        "OpenAIEndpoint": "<your-openai-endpoint>",
+        "OpenAIKey": "<your-openai-key>"
+      }
+    }
+    ```
+
+    > #### How to get GitHubToken
+    > 1. Go to [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens).
+    > 2. Click **Generate new token**.
+    > 3. Select **repo** scope (for PRs and comments).
+    > 4. Copy the generated token and use it as the value for `GitHubToken`.
+    > 
+    > #### How to get OpenAIEndpoint
+    > 1. Go to the [Azure Portal](https://portal.azure.com).
+    > 2. Navigate to your Azure OpenAI resource.
+    > 3. Under **Resource Management > Keys and Endpoint**, copy the **Endpoint** value.
+    >     - It will look like:  
+    >       `https://<your-resource-name>.openai.azure.com/openai/deployments/<deployment-name>/chat/completions?api-version=2024-02-15-preview`
+    > > - Ensure you have a deployment created in your Azure OpenAI resource using [https://oai.azure.com/](https://oai.azure.com/).
+    > 
+    > #### How to get OpenAIKey
+    > 1. In the same **Keys and Endpoint** section of your Azure OpenAI resource, copy one of the **Key** values.
+    > 2. Use this as the value for `OpenAIKey`.
+
 3. **Run the function locally:**
-	```bash
-	func start
-	```
-or use Visual Studio's __Start Debugging__.
+    ```bash
+    func start
+    ```
+    Or use Visual Studio's __Start Debugging__.
 
 4. **Set up GitHub webhook:**
-- Go to your repository settings > Webhooks.
-- Add a webhook pointing to your local/hosted function endpoint.
-- Select "Pull requests" events.
+    - Go to your repository settings > **Webhooks**.
+    - Add a webhook pointing to your local/hosted function endpoint.
+    - Select **Pull requests** events.
 
 ### Deployment
 
