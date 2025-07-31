@@ -24,7 +24,7 @@ public class GitHubWebhookFunction
 
     [Function("GitHubWebhook")]
     public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post")] HttpRequestData req)
     {
         var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
         using var doc = JsonDocument.Parse(requestBody);
@@ -41,11 +41,11 @@ public class GitHubWebhookFunction
         var repo = root.GetProperty("repository");
         var repoName = repo.GetProperty("name").GetString();
         var owner = repo.GetProperty("owner").GetProperty("login").GetString();
-        // Fetch PR files
+        // Fetch PR files and their full content
         var filesUrl = $"https://api.github.com/repos/{owner}/{repoName}/pulls/{prNumber}/files";
-        var codeDiff = await FetchPrFiles(filesUrl);
+        var (codeDiff, fullFiles) = await FetchPrFilesAndContents(filesUrl, owner, repoName, pr);
         // Analyze code with OpenAI
-        var feedback = await AnalyzeCodeWithOpenAI(codeDiff);
+        var feedback = await AnalyzeCodeWithOpenAI(codeDiff, fullFiles);
         // Post feedback as comment
         var commentsUrl = $"https://api.github.com/repos/{owner}/{repoName}/issues/{prNumber}/comments";
         await PostComment(commentsUrl, feedback);
@@ -54,7 +54,8 @@ public class GitHubWebhookFunction
         return response;
     }
 
-    private async Task<string> FetchPrFiles(string url)
+    // Fetches both code diffs and full file contents for updated files
+    private async Task<(string codeDiff, string fullFiles)> FetchPrFilesAndContents(string url, string owner, string repoName, JsonElement pr)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PRReviewerBot", "1.0"));
@@ -62,27 +63,71 @@ public class GitHubWebhookFunction
         var response = await _httpClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
         var content = await response.Content.ReadAsStringAsync();
-        // Extract code changes (patches)
         var files = JsonDocument.Parse(content).RootElement.EnumerateArray();
-        var sb = new StringBuilder();
+        var sbDiff = new StringBuilder();
+        var sbFull = new StringBuilder();
+
+        // Get the head SHA for the PR to fetch the latest file content
+        var headSha = pr.GetProperty("head").GetProperty("sha").GetString();
+
         foreach (var file in files)
         {
+            var filename = file.GetProperty("filename").GetString();
             if (file.TryGetProperty("patch", out var patch))
             {
-                sb.AppendLine($"File: {file.GetProperty("filename").GetString()}\n{patch.GetString()}\n");
+                sbDiff.AppendLine($"File: {filename}\n{patch.GetString()}\n");
+            }
+            // Fetch the full file content at the PR's head commit
+            var fileContent = await FetchFileContent(owner, repoName, filename, headSha);
+            if (!string.IsNullOrEmpty(fileContent))
+            {
+                sbFull.AppendLine($"File: {filename}\n{fileContent}\n");
             }
         }
-        return sb.ToString();
+        return (sbDiff.ToString(), sbFull.ToString());
     }
 
-    private async Task<string> AnalyzeCodeWithOpenAI(string codeDiff)
+    // Fetches the raw content of a file at a specific commit SHA
+    private async Task<string?> FetchFileContent(string owner, string repo, string path, string sha)
     {
-        var prompt = $"Review the following code changes for naming, structure, and readability. Give concise feedback.\n{codeDiff}";
+        var url = $"https://api.github.com/repos/{owner}/{repo}/contents/{Uri.EscapeDataString(path)}?ref={sha}";
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PRReviewerBot", "1.0"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _githubToken);
+        var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+            return null;
+        var content = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(content);
+        if (doc.RootElement.TryGetProperty("content", out var encodedContent) &&
+            doc.RootElement.TryGetProperty("encoding", out var encoding) &&
+            encoding.GetString() == "base64")
+        {
+            var base64 = encodedContent.GetString();
+            if (!string.IsNullOrEmpty(base64))
+            {
+                var bytes = Convert.FromBase64String(base64);
+                return Encoding.UTF8.GetString(bytes);
+            }
+        }
+        return null;
+    }
+
+    // Now includes both codeDiff and fullFiles in the prompt
+    private async Task<string> AnalyzeCodeWithOpenAI(string codeDiff, string fullFiles)
+    {
+        var prompt = new StringBuilder();
+        prompt.AppendLine("Review the following code changes for naming, structure, and readability. Give concise feedback.");
+        prompt.AppendLine("## Code Changes (Diffs):");
+        prompt.AppendLine(codeDiff);
+        prompt.AppendLine("## Full Content of Updated Files:");
+        prompt.AppendLine(fullFiles);
+
         var payload = new
         {
             messages = new[] {
                 new { role = "system", content = "You are a code reviewer bot." },
-                new { role = "user", content = prompt }
+                new { role = "user", content = prompt.ToString() }
             },
             max_tokens = 512
         };
