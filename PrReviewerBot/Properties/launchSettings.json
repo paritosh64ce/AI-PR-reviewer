@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "PrReviewerBot": {
+      "commandName": "Project",
+      "commandLineArgs": "--port 7174",
+      "launchBrowser": false
+    }
+  }
+}
