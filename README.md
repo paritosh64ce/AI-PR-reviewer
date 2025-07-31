@@ -1,11 +1,12 @@
 # PRReviewerBot
 
 ## Overview
-PRReviewerBot is an Azure Functions-based bot that automatically reviews GitHub pull requests using Azure OpenAI (GPT). When a pull request is opened or updated, the bot analyzes code changes for naming, structure, and readability, then posts feedback as a comment on the PR.
+PRReviewerBot is an Azure Functions-based bot that automatically reviews GitHub pull requests using Azure OpenAI (GPT). When a pull request is opened or updated, the bot analyzes both the code changes (diffs) and the full content of all updated files for naming, structure, and readability, then posts feedback as a comment on the PR.
 
 ## Features
 - Monitors pull requests via GitHub webhook.
 - Uses GPT to provide feedback on code quality.
+- Reviews both code diffs and the entire content of updated files.
 - Posts feedback directly as a comment in the pull request.
 
 ## Tech Stack
