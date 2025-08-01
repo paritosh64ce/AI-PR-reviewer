@@ -107,3 +107,7 @@ PRReviewerBot is an Azure Functions-based bot that automatically reviews GitHub 
 ## License
 
 This project is licensed under the MIT License.
+
+
+WIP
+- identifying issue in executing the webhook - getting 500 error: https://github.com/paritosh64ce/AI-PR-reviewer/settings/hooks/561237182?tab=deliveries
