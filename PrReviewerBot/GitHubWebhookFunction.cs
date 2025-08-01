@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text;
 using Microsoft.Azure.Functions.Worker;
@@ -172,22 +172,29 @@ public class GitHubWebhookFunction
                 new { role = "system", content = "You are a code reviewer bot." },
                 new { role = "user", content = prompt.ToString() }
             },
-            max_tokens = 512
+            max_completion_tokens = 512
         };
         var request = new HttpRequestMessage(HttpMethod.Post, _openAiEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _openAiKey);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("OpenAI API error: {StatusCode}, Response: {Response}", response.StatusCode, errorContent);
+            throw new Exception($"OpenAI API error: {response.StatusCode} - {errorContent}");
+        }
+
         response.EnsureSuccessStatusCode();
         var content = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(content);
         var feedback = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
-        return feedback ?? "No feedback generated.";
+        return string.IsNullOrWhiteSpace(feedback) ? "No feedback generated." : feedback;
     }
 
     private async Task PostComment(string url, string feedback)
     {
-        var payload = new { body = feedback };
+        var payload = new { body = $"😎 PR Reviewer Bot 😎 commented: {feedback}" };
         var request = new HttpRequestMessage(HttpMethod.Post, url);
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PRReviewerBot", "1.0"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _githubToken);
