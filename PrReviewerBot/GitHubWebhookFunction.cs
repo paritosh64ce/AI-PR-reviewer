@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
+using System.Net;
 
 public class GitHubWebhookFunction
 {
@@ -35,14 +36,14 @@ public class GitHubWebhookFunction
             if (string.IsNullOrWhiteSpace(requestBody))
             {
                 _logger.LogWarning("Request body is empty.");
-                var resp = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
+                var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                 await resp.WriteStringAsync("Request body is empty.");
                 return resp;
             }
             if (!requestBody.TrimStart().StartsWith("{"))
             {
                 _logger.LogWarning("Request body is not valid JSON: {body}", requestBody);
-                var resp = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
+                var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                 await resp.WriteStringAsync("Request body is not valid JSON.");
                 return resp;
             }
@@ -52,7 +53,7 @@ public class GitHubWebhookFunction
             var action = root.GetProperty("action").GetString();
             if (action != "opened" && action != "synchronize" && action != "edited")
             {
-                var resp = req.CreateResponse(System.Net.HttpStatusCode.OK);
+                var resp = req.CreateResponse(HttpStatusCode.OK);
                 await resp.WriteStringAsync("Ignored event");
                 return resp;
             }
@@ -66,14 +67,14 @@ public class GitHubWebhookFunction
             var feedback = await AnalyzeCodeWithOpenAI(codeDiff, fullFiles);
             var commentsUrl = $"https://api.github.com/repos/{owner}/{repoName}/issues/{prNumber}/comments";
             await PostComment(commentsUrl, feedback);
-            var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+            var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteStringAsync("Reviewed");
             return response;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception in GitHubWebhookFunction");
-            var errorResp = req.CreateResponse(System.Net.HttpStatusCode.InternalServerError);
+            var errorResp = req.CreateResponse(HttpStatusCode.InternalServerError);
             await errorResp.WriteStringAsync($"Internal server error: {ex.Message}");
             return errorResp;
         }
