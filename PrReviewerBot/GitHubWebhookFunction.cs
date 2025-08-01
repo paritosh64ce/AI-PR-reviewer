@@ -60,7 +60,7 @@ public class GitHubWebhookFunction
             var pr = root.GetProperty("pull_request");
             var prNumber = pr.GetProperty("number").GetInt32();
             var repo = root.GetProperty("repository");
-            var repoName = repo.GetProperty("name").GetString();
+            var repoName = repo.GetProperty("name").GetString() ?? string.Empty;
             var owner = repo.GetProperty("owner").GetProperty("login").GetString() ?? string.Empty;
             _logger.LogInformation("Step 1: Processing PR #{prNumber} in {repoName}/{owner}", prNumber, repoName, owner);
 
