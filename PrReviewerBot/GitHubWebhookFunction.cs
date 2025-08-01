@@ -61,13 +61,22 @@ public class GitHubWebhookFunction
             var prNumber = pr.GetProperty("number").GetInt32();
             var repo = root.GetProperty("repository");
             var repoName = repo.GetProperty("name").GetString();
-            var owner = repo.GetProperty("owner").GetProperty("login").GetString();
+            var owner = repo.GetProperty("owner").GetProperty("login").GetString() ?? string.Empty;
+            _logger.LogInformation("Step 1: Processing PR #{prNumber} in {repoName}/{owner}", prNumber, repoName, owner);
+
             var filesUrl = $"https://api.github.com/repos/{owner}/{repoName}/pulls/{prNumber}/files";
+
             var (codeDiff, fullFiles) = await FetchPrFilesAndContents(filesUrl, owner, repoName, pr);
+            _logger.LogInformation("Step 2: Fetched code diff and full file contents for PR #{prNumber}", prNumber);
+            
+            _logger.LogInformation("Step 3: Analyzing code with OpenAI");
             var feedback = await AnalyzeCodeWithOpenAI(codeDiff, fullFiles);
+
+            _logger.LogInformation("Step 4: Posting feedback to GitHub");
             var commentsUrl = $"https://api.github.com/repos/{owner}/{repoName}/issues/{prNumber}/comments";
             await PostComment(commentsUrl, feedback);
             var response = req.CreateResponse(HttpStatusCode.OK);
+            
             await response.WriteStringAsync("Reviewed");
             return response;
         }
