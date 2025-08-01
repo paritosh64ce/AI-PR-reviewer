@@ -69,6 +69,14 @@ public class GitHubWebhookFunction
             var (codeDiff, fullFiles) = await FetchPrFilesAndContents(filesUrl, owner, repoName, pr);
             _logger.LogInformation("Step 2: Fetched code diff and full file contents for PR #{prNumber}", prNumber);
             
+            if (string.IsNullOrWhiteSpace(codeDiff) && string.IsNullOrWhiteSpace(fullFiles))
+            {
+                _logger.LogInformation("No code changes found in PR #{prNumber}", prNumber);
+                var response1 = req.CreateResponse(HttpStatusCode.OK);
+                await response1.WriteStringAsync("No code changes found.");
+                return response1;
+            }
+
             _logger.LogInformation("Step 3: Analyzing code with OpenAI");
             var feedback = await AnalyzeCodeWithOpenAI(codeDiff, fullFiles);
 
