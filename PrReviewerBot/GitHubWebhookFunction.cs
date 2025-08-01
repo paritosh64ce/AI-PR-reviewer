@@ -98,7 +98,7 @@ public class GitHubWebhookFunction
 
         foreach (var file in files)
         {
-            var filename = file.GetProperty("filename").GetString() ?? string.Empty;
+            var filename = file.GetProperty("filename").GetString();
             if (file.TryGetProperty("patch", out var patch))
             {
                 sbDiff.AppendLine($"File: {filename}\n{patch.GetString()}\n");
@@ -176,6 +176,12 @@ public class GitHubWebhookFunction
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _githubToken);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Failed to post comment. Status: {StatusCode}, Response: {Response}", response.StatusCode, errorContent);
+            throw new Exception($"GitHub API error: {response.StatusCode} - {errorContent}");
+        }
     }
 }
