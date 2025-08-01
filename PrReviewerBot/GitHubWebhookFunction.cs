@@ -61,7 +61,7 @@ public class GitHubWebhookFunction
             var prNumber = pr.GetProperty("number").GetInt32();
             var repo = root.GetProperty("repository");
             var repoName = repo.GetProperty("name").GetString();
-            var owner = repo.GetProperty("owner").GetProperty("login").GetString() ?? string.Empty;
+            var owner = repo.GetProperty("owner").GetProperty("login").GetString();
             var filesUrl = $"https://api.github.com/repos/{owner}/{repoName}/pulls/{prNumber}/files";
             var (codeDiff, fullFiles) = await FetchPrFilesAndContents(filesUrl, owner, repoName, pr);
             var feedback = await AnalyzeCodeWithOpenAI(codeDiff, fullFiles);
