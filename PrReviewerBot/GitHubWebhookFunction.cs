@@ -30,87 +30,89 @@ public class GitHubWebhookFunction
         try
         {
             _logger.LogWarning("Step 1: Start function");
-            var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-            _logger.LogWarning("Step 2: Read body: '{body}'", requestBody);
-
-            if (string.IsNullOrWhiteSpace(requestBody))
+            var requestBody = await ReadRequestBodyAsync(req);
+            if (!IsValidPayload(requestBody))
             {
-                _logger.LogWarning("Request body is empty.");
-                var resp = req.CreateResponse(HttpStatusCode.BadRequest);
-                await resp.WriteStringAsync("Request body is empty.");
-                return resp;
-            }
-            if (!requestBody.TrimStart().StartsWith("{"))
-            {
-                _logger.LogWarning("Request body is not valid JSON: {body}", requestBody);
-                var resp = req.CreateResponse(HttpStatusCode.BadRequest);
-                await resp.WriteStringAsync("Request body is not valid JSON.");
-                return resp;
+                _logger.LogWarning("Invalid request body: '{body}'", requestBody);
+                return await CreateResponseAsync(req, HttpStatusCode.BadRequest, "Request body is not valid JSON.");
             }
 
-            using var doc = JsonDocument.Parse(requestBody);
-            var root = doc.RootElement;
-            var action = root.GetProperty("action").GetString();
-            if (action != "opened" && action != "synchronize" && action != "edited")
+            var root = JsonDocument.Parse(requestBody).RootElement;
+            if (!IsSupportedAction(root))
             {
-                var resp = req.CreateResponse(HttpStatusCode.OK);
-                await resp.WriteStringAsync("Ignored event");
-                return resp;
+                return await CreateResponseAsync(req, HttpStatusCode.OK, "Ignored event");
             }
-            var pr = root.GetProperty("pull_request");
-            var prNumber = pr.GetProperty("number").GetInt32();
-            var repo = root.GetProperty("repository");
-            var repoName = repo.GetProperty("name").GetString();
-            var owner = repo.GetProperty("owner").GetProperty("login").GetString() ?? string.Empty;
-            _logger.LogInformation("Step 1: Processing PR #{prNumber} in {repoName}/{owner}", prNumber, repoName, owner);
+
+            var prNumber = root.GetProperty("pull_request").GetProperty("number").GetInt32();
+            var repoName = root.GetProperty("repository").GetProperty("name").GetString() ?? string.Empty;
+            var owner = root.GetProperty("repository").GetProperty("owner").GetProperty("login").GetString() ?? string.Empty;
+            _logger.LogInformation("Processing PR #{prNumber} in {repoName}/{owner}", prNumber, repoName, owner);
 
             var filesUrl = $"https://api.github.com/repos/{owner}/{repoName}/pulls/{prNumber}/files";
-
+            var pr = root.GetProperty("pull_request");
             var (codeDiff, fullFiles) = await FetchPrFilesAndContents(filesUrl, owner, repoName, pr);
-            _logger.LogInformation("Step 2: Fetched code diff and full file contents for PR #{prNumber}", prNumber);
-            
+
             if (string.IsNullOrWhiteSpace(codeDiff) && string.IsNullOrWhiteSpace(fullFiles))
             {
                 _logger.LogInformation("No code changes found in PR #{prNumber}", prNumber);
-                var response1 = req.CreateResponse(HttpStatusCode.OK);
-                await response1.WriteStringAsync("No code changes found.");
-                return response1;
+                return await CreateResponseAsync(req, HttpStatusCode.OK, "No code changes found.");
             }
 
-            _logger.LogInformation("Step 3: Analyzing code with OpenAI");
             var feedback = await AnalyzeCodeWithOpenAI(codeDiff, fullFiles);
-
-            _logger.LogInformation("Step 4: Posting feedback to GitHub");
             var commentsUrl = $"https://api.github.com/repos/{owner}/{repoName}/issues/{prNumber}/comments";
             await PostComment(commentsUrl, feedback);
-            var response = req.CreateResponse(HttpStatusCode.OK);
-            
-            await response.WriteStringAsync("Reviewed");
-            return response;
+
+            return await CreateResponseAsync(req, HttpStatusCode.OK, "Reviewed");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception in GitHubWebhookFunction");
-            var errorResp = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await errorResp.WriteStringAsync($"Internal server error: {ex.Message}");
-            return errorResp;
+            return await CreateResponseAsync(req, HttpStatusCode.InternalServerError, $"Internal server error: {ex.Message}");
         }
     }
 
-    // Fetches both code diffs and full file contents for updated files
+    private async Task<string> ReadRequestBodyAsync(HttpRequestData req)
+    {
+        using var reader = new StreamReader(req.Body);
+        return await reader.ReadToEndAsync();
+    }
+
+    private bool IsValidPayload(string requestBody)
+    {
+        if (string.IsNullOrWhiteSpace(requestBody) || !requestBody.TrimStart().StartsWith("{"))
+            return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(requestBody);
+            var root = doc.RootElement;
+            return root.TryGetProperty("action", out _) &&
+                   root.TryGetProperty("pull_request", out _) &&
+                   root.TryGetProperty("repository", out _);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool IsSupportedAction(JsonElement root)
+    {
+        var action = root.GetProperty("action").GetString();
+        return action == "opened" || action == "synchronize" || action == "edited";
+    }
+
+    private async Task<HttpResponseData> CreateResponseAsync(HttpRequestData req, HttpStatusCode status, string message)
+    {
+        var resp = req.CreateResponse(status);
+        await resp.WriteStringAsync(message);
+        return resp;
+    }
+
     private async Task<(string codeDiff, string fullFiles)> FetchPrFilesAndContents(string url, string owner, string repoName, JsonElement pr)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PRReviewerBot", "1.0"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _githubToken);
-        var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        var content = await response.Content.ReadAsStringAsync();
-        var files = JsonDocument.Parse(content).RootElement.EnumerateArray();
+        var files = await GetPrFilesAsync(url);
         var sbDiff = new StringBuilder();
         var sbFull = new StringBuilder();
-
-        // Get the head SHA for the PR to fetch the latest file content
         var headSha = pr.GetProperty("head").GetProperty("sha").GetString();
 
         foreach (var file in files)
@@ -120,7 +122,6 @@ public class GitHubWebhookFunction
             {
                 sbDiff.AppendLine($"File: {filename}\n{patch.GetString()}\n");
             }
-            // Fetch the full file content at the PR's head commit
             var fileContent = await FetchFileContent(owner, repoName, filename, headSha);
             if (!string.IsNullOrEmpty(fileContent))
             {
@@ -130,7 +131,18 @@ public class GitHubWebhookFunction
         return (sbDiff.ToString(), sbFull.ToString());
     }
 
-    // Fetches the raw content of a file at a specific commit SHA
+    private async Task<JsonElement[]> GetPrFilesAsync(string url)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PRReviewerBot", "1.0"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _githubToken);
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var content = await response.Content.ReadAsStringAsync();
+        var files = JsonDocument.Parse(content).RootElement.EnumerateArray();
+        return files.ToArray();
+    }
+
     private async Task<string?> FetchFileContent(string owner, string repo, string path, string sha)
     {
         var url = $"https://api.github.com/repos/{owner}/{repo}/contents/{Uri.EscapeDataString(path)}?ref={sha}";
@@ -156,7 +168,6 @@ public class GitHubWebhookFunction
         return null;
     }
 
-    // Now includes both codeDiff and fullFiles in the prompt
     private async Task<string> AnalyzeCodeWithOpenAI(string codeDiff, string fullFiles)
     {
         var prompt = new StringBuilder();
@@ -184,8 +195,6 @@ public class GitHubWebhookFunction
             _logger.LogError("OpenAI API error: {StatusCode}, Response: {Response}", response.StatusCode, errorContent);
             throw new Exception($"OpenAI API error: {response.StatusCode} - {errorContent}");
         }
-
-        response.EnsureSuccessStatusCode();
         var content = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(content);
         var feedback = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
