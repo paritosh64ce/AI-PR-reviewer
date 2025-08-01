@@ -67,6 +67,7 @@ public class GitHubWebhookFunction
         var sb = new StringBuilder();
         foreach (var file in files)
         {
+            var filename = file.GetProperty("filename").GetString() ?? string.Empty;
             if (file.TryGetProperty("patch", out var patch))
             {
                 sb.AppendLine($"File: {file.GetProperty("filename").GetString()}\n{patch.GetString()}\n");
