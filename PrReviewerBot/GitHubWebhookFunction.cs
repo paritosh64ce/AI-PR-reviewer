@@ -97,7 +97,7 @@ public class GitHubWebhookFunction
 
         foreach (var file in files)
         {
-            var filename = file.GetProperty("filename").GetString();
+            var filename = file.GetProperty("filename").GetString() ?? string.Empty;
             if (file.TryGetProperty("patch", out var patch))
             {
                 sbDiff.AppendLine($"File: {filename}\n{patch.GetString()}\n");
